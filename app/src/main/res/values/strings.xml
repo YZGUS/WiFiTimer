@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WiFi计时器</string>
+    <string name="channel_monitor">WiFi监控服务</string>
+    <string name="channel_reminder">达标提醒</string>
+    <string name="notification_monitor_title">WiFi监控运行中</string>
+    <string name="notification_monitor_connected">今日有效：%1$s / 目标 %2$s</string>
+    <string name="notification_monitor_disconnected">当前未连接目标WiFi</string>
+</resources>
