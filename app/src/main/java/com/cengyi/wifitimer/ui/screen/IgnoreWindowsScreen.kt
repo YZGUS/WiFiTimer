@@ -15,6 +15,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.cengyi.wifitimer.data.local.IgnoreWindow
 import java.time.DayOfWeek
 
+private val DAY_LABELS = linkedMapOf(
+    DayOfWeek.MONDAY to "周一",
+    DayOfWeek.TUESDAY to "周二",
+    DayOfWeek.WEDNESDAY to "周三",
+    DayOfWeek.THURSDAY to "周四",
+    DayOfWeek.FRIDAY to "周五",
+    DayOfWeek.SATURDAY to "周六",
+    DayOfWeek.SUNDAY to "周日"
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun IgnoreWindowsScreen(
@@ -127,9 +137,7 @@ private fun IgnoreWindowItem(
                 )
                 if (window.repeatDays.isNotEmpty()) {
                     Text(
-                        window.repeatDays.joinToString(" ") {
-                            it.name.take(3)
-                        },
+                        window.repeatDays.mapNotNull { DAY_LABELS[it] }.joinToString(" "),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -152,7 +160,7 @@ private fun IgnoreWindowItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun EditIgnoreWindowDialog(
     state: IgnoreWindowEditState,
@@ -232,20 +240,11 @@ private fun EditIgnoreWindowDialog(
 
                 // 重复日选择
                 Text("重复日", style = MaterialTheme.typography.labelMedium)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    val dayLabels = mapOf(
-                        DayOfWeek.MONDAY to "一",
-                        DayOfWeek.TUESDAY to "二",
-                        DayOfWeek.WEDNESDAY to "三",
-                        DayOfWeek.THURSDAY to "四",
-                        DayOfWeek.FRIDAY to "五",
-                        DayOfWeek.SATURDAY to "六",
-                        DayOfWeek.SUNDAY to "日"
-                    )
-                    dayLabels.forEach { (day, label) ->
+                    DAY_LABELS.forEach { (day, label) ->
                         val selected = day in selectedDays
                         FilterChip(
                             selected = selected,

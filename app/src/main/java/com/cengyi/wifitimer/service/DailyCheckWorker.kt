@@ -8,8 +8,8 @@ import androidx.core.app.NotificationCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.*
 import com.cengyi.wifitimer.R
-import com.cengyi.wifitimer.data.repository.IgnoreWindowRepository
 import com.cengyi.wifitimer.data.repository.SessionRepository
+import com.cengyi.wifitimer.data.repository.TargetConfigRepository
 import com.cengyi.wifitimer.data.repository.WhitelistRepository
 import com.cengyi.wifitimer.util.WifiUtils
 import dagger.assisted.Assisted
@@ -27,7 +27,7 @@ class DailyCheckWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val sessionRepo: SessionRepository,
     private val whitelistRepo: WhitelistRepository,
-    private val ignoreWindowRepo: IgnoreWindowRepository
+    private val targetConfigRepo: TargetConfigRepository
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -55,15 +55,10 @@ class DailyCheckWorker @AssistedInject constructor(
         val today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
         val totalMs = sessionRepo.getEffectiveTotalForDate(today)
 
-        // 获取目标时长（取白名单中最小的目标）
-        val entries = whitelistRepo.getEnabledList()
-        val targetMs = entries.minOfOrNull { it.targetMinutes * 60_000L }
-            ?: WifiUtils.DEFAULT_TARGET_MS
+        val targetMs = targetConfigRepo.getTargetMinutes() * 60_000L
 
-        // 更新每日统计
         sessionRepo.recalculateDailyStats(today, targetMs)
 
-        // 判断是否需要提醒
         val remaining = targetMs - totalMs
         val now = LocalDateTime.now()
         val endOfWork = LocalDateTime.of(now.toLocalDate(), LocalTime.of(18, 0))
@@ -72,7 +67,7 @@ class DailyCheckWorker @AssistedInject constructor(
         when {
             remaining <= 0 -> {
                 showNotification(
-                    "今日已达标 ✓",
+                    "今日已达标",
                     "累计 ${WifiUtils.formatDuration(totalMs)}"
                 )
             }
@@ -108,7 +103,7 @@ class DailyCheckWorker @AssistedInject constructor(
         val notification = NotificationCompat.Builder(applicationContext, REMINDER_CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setAutoCancel(true)
             .build()
 

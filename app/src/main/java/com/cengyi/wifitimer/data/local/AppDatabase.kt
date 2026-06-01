@@ -9,9 +9,10 @@ import androidx.room.TypeConverters
         WiFiWhitelistEntry::class,
         WiFiSession::class,
         IgnoreWindow::class,
-        DailyStats::class
+        DailyStats::class,
+        TargetConfig::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -20,4 +21,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
     abstract fun ignoreWindowDao(): IgnoreWindowDao
     abstract fun dailyStatsDao(): DailyStatsDao
+    abstract fun targetConfigDao(): TargetConfigDao
 }

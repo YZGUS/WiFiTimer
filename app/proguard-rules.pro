@@ -8,3 +8,9 @@
 
 # Kotlin Coroutines
 -dontwarn kotlinx.coroutines.**
+
+# Compose
+-dontwarn androidx.compose.**
+
+# AndroidX
+-dontwarn androidx.**

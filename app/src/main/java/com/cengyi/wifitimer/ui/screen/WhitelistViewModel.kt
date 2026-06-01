@@ -24,14 +24,13 @@ class WhitelistViewModel @Inject constructor(
     private val _editEntry = MutableStateFlow<WiFiWhitelistEntry?>(null)
     val editEntry: StateFlow<WiFiWhitelistEntry?> = _editEntry.asStateFlow()
 
-    fun addEntry(ssid: String, bssid: String?, alias: String, targetMinutes: Int) {
+    fun addEntry(ssid: String, bssid: String?, alias: String) {
         viewModelScope.launch {
             repo.insert(
                 WiFiWhitelistEntry(
                     ssid = ssid,
                     bssid = bssid?.ifBlank { null },
-                    alias = alias,
-                    targetMinutes = targetMinutes
+                    alias = alias
                 )
             )
         }

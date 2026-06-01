@@ -28,32 +28,36 @@ object WifiUtils {
     }
 
     /**
-     * 格式化时长（毫秒 → "X小时Y分"）
+     * 格式化时长（毫秒 → "X小时Y分Z秒"）
      */
     fun formatDuration(ms: Long): String {
-        val totalMinutes = ms / 60000
-        val hours = totalMinutes / 60
-        val minutes = totalMinutes % 60
+        val totalSeconds = ms / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
         return when {
-            hours > 0 && minutes > 0 -> "${hours}小时${minutes}分"
+            hours > 0 && minutes > 0 -> "${hours}小时${minutes}分${seconds}秒"
+            hours > 0 && seconds > 0 -> "${hours}小时${seconds}秒"
             hours > 0 -> "${hours}小时"
-            minutes > 0 -> "${minutes}分"
-            else -> "0分"
+            minutes > 0 -> "${minutes}分${seconds}秒"
+            else -> "${seconds}秒"
         }
     }
 
     /**
-     * 格式化时长（毫秒 → "Xh Ym"）
+     * 格式化时长（毫秒 → "Xh Ym Zs"）
      */
     fun formatDurationShort(ms: Long): String {
-        val totalMinutes = ms / 60000
-        val hours = totalMinutes / 60
-        val minutes = totalMinutes % 60
+        val totalSeconds = ms / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
         return when {
-            hours > 0 && minutes > 0 -> "${hours}h ${minutes}m"
+            hours > 0 && minutes > 0 -> "${hours}h ${minutes}m ${seconds}s"
+            hours > 0 && seconds > 0 -> "${hours}h ${seconds}s"
             hours > 0 -> "${hours}h"
-            minutes > 0 -> "${minutes}m"
-            else -> "0m"
+            minutes > 0 -> "${minutes}m ${seconds}s"
+            else -> "${seconds}s"
         }
     }
 

@@ -9,6 +9,7 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
             WiFiMonitorService.start(context)
             DailyCheckWorker.schedule(context)
+            MonitorCheckWorker.schedule(context)
         }
     }
 }

@@ -1,5 +1,9 @@
 package com.cengyi.wifitimer.ui.screen
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -9,10 +13,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.cengyi.wifitimer.data.local.WiFiWhitelistEntry
+import com.cengyi.wifitimer.util.WifiScanner
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,18 +90,16 @@ fun WhitelistScreen(
         }
     }
 
-    // 添加弹窗
     if (showAddDialog) {
         AddWhitelistDialog(
             onDismiss = { showAddDialog = false },
-            onConfirm = { ssid, bssid, alias, targetMinutes ->
-                viewModel.addEntry(ssid, bssid, alias, targetMinutes)
+            onConfirm = { ssid, alias ->
+                viewModel.addEntry(ssid, null, alias)
                 showAddDialog = false
             }
         )
     }
 
-    // 编辑弹窗
     editEntry?.let { entry ->
         EditWhitelistDialog(
             entry = entry,
@@ -136,18 +141,6 @@ private fun WhitelistItem(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (entry.bssid != null) {
-                    Text(
-                        "BSSID: ${entry.bssid}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text(
-                    "目标：${entry.targetMinutes / 60}h ${entry.targetMinutes % 60}m",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
             }
             IconButton(onClick = onEdit) {
                 Icon(Icons.Default.Edit, contentDescription = "编辑")
@@ -160,72 +153,133 @@ private fun WhitelistItem(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddWhitelistDialog(
     onDismiss: () -> Unit,
-    onConfirm: (ssid: String, bssid: String?, alias: String, targetMinutes: Int) -> Unit
+    onConfirm: (ssid: String, alias: String) -> Unit
 ) {
+    val context = LocalContext.current
     var ssid by remember { mutableStateOf("") }
-    var bssid by remember { mutableStateOf("") }
     var alias by remember { mutableStateOf("") }
-    var targetHours by remember { mutableStateOf(9) }
-    var targetMinutesPart by remember { mutableStateOf(30) }
+    var expanded by remember { mutableStateOf(false) }
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+                    == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        hasLocationPermission = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+    }
+
+    // Scan WiFi after permission is granted
+    val wifiList = remember(hasLocationPermission) {
+        if (hasLocationPermission) {
+            WifiScanner.startScan(context)
+            WifiScanner.getAvailableNetworks(context)
+        } else {
+            emptyList()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("添加WiFi白名单") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = ssid,
-                    onValueChange = { ssid = it },
-                    label = { Text("WiFi名称 (SSID)") },
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = bssid,
-                    onValueChange = { bssid = it },
-                    label = { Text("BSSID（可选）") },
-                    singleLine = true
-                )
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { newExpanded ->
+                        if (newExpanded && !hasLocationPermission) {
+                            permissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
+                            return@ExposedDropdownMenuBox
+                        }
+                        expanded = newExpanded
+                    }
+                ) {
+                    OutlinedTextField(
+                        value = ssid,
+                        onValueChange = {
+                            ssid = it
+                            expanded = false
+                        },
+                        label = { Text("WiFi名称") },
+                        singleLine = true,
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                        },
+                        modifier = Modifier.menuAnchor()
+                    )
+
+                    if (wifiList.isNotEmpty()) {
+                        ExposedDropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            wifiList.forEach { network ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                Icons.Default.Wifi,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = if (network.level > -50) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(network.ssid)
+                                        }
+                                    },
+                                    onClick = {
+                                        ssid = network.ssid
+                                        if (alias.isBlank()) alias = network.ssid
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Manual input hint when no scan results
+                if (wifiList.isEmpty() && !hasLocationPermission) {
+                    Text(
+                        "点击输入框右侧图标授权位置权限，即可扫描附近WiFi",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (wifiList.isEmpty() && hasLocationPermission) {
+                    Text(
+                        "未扫描到WiFi，请手动输入WiFi名称",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 OutlinedTextField(
                     value = alias,
                     onValueChange = { alias = it },
-                    label = { Text("备注别名") },
+                    label = { Text("备注别名（可选）") },
                     singleLine = true
                 )
-                Text("每日目标时长", style = MaterialTheme.typography.labelMedium)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = targetHours.toString(),
-                        onValueChange = { targetHours = it.toIntOrNull() ?: 0 },
-                        label = { Text("小时") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = targetMinutesPart.toString(),
-                        onValueChange = { targetMinutesPart = it.toIntOrNull() ?: 0 },
-                        label = { Text("分钟") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
                     if (ssid.isNotBlank()) {
-                        onConfirm(
-                            ssid.trim(),
-                            bssid.ifBlank { null },
-                            alias.trim(),
-                            targetHours * 60 + targetMinutesPart
-                        )
+                        onConfirm(ssid.trim(), alias.trim())
                     }
                 },
                 enabled = ssid.isNotBlank()
@@ -246,55 +300,25 @@ private fun EditWhitelistDialog(
     onConfirm: (WiFiWhitelistEntry) -> Unit
 ) {
     var alias by remember { mutableStateOf(entry.alias) }
-    var targetHours by remember { mutableStateOf(entry.targetMinutes / 60) }
-    var targetMinutesPart by remember { mutableStateOf(entry.targetMinutes % 60) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("编辑白名单") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("SSID: ${entry.ssid}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (entry.bssid != null) {
-                    Text("BSSID: ${entry.bssid}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Text("WiFi: ${entry.ssid}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(
                     value = alias,
                     onValueChange = { alias = it },
                     label = { Text("备注别名") },
                     singleLine = true
                 )
-                Text("每日目标时长", style = MaterialTheme.typography.labelMedium)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = targetHours.toString(),
-                        onValueChange = { targetHours = it.toIntOrNull() ?: 0 },
-                        label = { Text("小时") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = targetMinutesPart.toString(),
-                        onValueChange = { targetMinutesPart = it.toIntOrNull() ?: 0 },
-                        label = { Text("分钟") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    onConfirm(
-                        entry.copy(
-                            alias = alias.trim(),
-                            targetMinutes = targetHours * 60 + targetMinutesPart
-                        )
-                    )
+                    onConfirm(entry.copy(alias = alias.trim()))
                 }
             ) {
                 Text("保存")
