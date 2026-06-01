@@ -355,6 +355,14 @@ class WiFiMonitorService : LifecycleService() {
 
     private fun sendDisconnectNotification(ssid: String) {
         Log.d(TAG, "Sending disconnect notification for SSID: $ssid")
+
+        // Update foreground notification to show disconnect alert (always visible)
+        notificationManager.notify(
+            NOTIFICATION_ID,
+            buildNotification("已离开目标WiFi", "已断开 $ssid 的连接")
+        )
+
+        // Also try separate high-priority notification (visible if POST_NOTIFICATIONS granted)
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }

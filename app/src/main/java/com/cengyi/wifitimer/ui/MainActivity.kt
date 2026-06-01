@@ -26,6 +26,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : androidx.activity.ComponentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        requestNotificationPermission()
         setContent {
             WiFiTimerTheme {
                 Surface(
@@ -43,5 +44,13 @@ class MainActivity : androidx.activity.ComponentActivity() {
         super.onStart()
         // 确保监控服务运行
         WiFiMonitorService.start(this)
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
+            }
+        }
     }
 }
