@@ -6,6 +6,4 @@
     <string name="notification_monitor_title">WiFi监控运行中</string>
     <string name="notification_monitor_connected">今日有效：%1$s / 目标 %2$s</string>
     <string name="notification_monitor_disconnected">当前未连接目标WiFi</string>
-    <string name="widget_description">显示WiFi计时进度</string>
-    <string name="widget_loading">加载中…</string>
 </resources>

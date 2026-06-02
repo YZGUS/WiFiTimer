@@ -24,12 +24,10 @@ import com.cengyi.wifitimer.ui.MainActivity
 import com.cengyi.wifitimer.util.IgnoreWindowCalculator
 import com.cengyi.wifitimer.util.TimeUtils
 import com.cengyi.wifitimer.util.WifiUtils
-import com.cengyi.wifitimer.widget.TimerWidget
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -45,7 +43,6 @@ class WiFiMonitorService : LifecycleService() {
 
     private var activeSession: ActiveSession? = null
     private var whitelistJob: kotlinx.coroutines.Job? = null
-    private var widgetUpdateJob: kotlinx.coroutines.Job? = null
     private val notificationManager by lazy {
         getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     }
@@ -94,7 +91,6 @@ class WiFiMonitorService : LifecycleService() {
 
         registerWifiReceiver()
         observeWhitelistChanges()
-        startWidgetUpdateLoop()
         checkAndUpdateWifiState()
 
         // Schedule periodic WiFi check as fallback
@@ -106,7 +102,6 @@ class WiFiMonitorService : LifecycleService() {
     override fun onDestroy() {
         Log.d(TAG, "onDestroy")
         whitelistJob?.cancel()
-        widgetUpdateJob?.cancel()
         endActiveSession()
         _serviceRunning.value = false
         _connectionState.value = ConnectionState.Disconnected
@@ -161,16 +156,6 @@ class WiFiMonitorService : LifecycleService() {
                     Log.d(TAG, "Whitelist changed, re-checking WiFi state")
                     checkAndUpdateWifiState()
                 }
-        }
-    }
-
-    private fun startWidgetUpdateLoop() {
-        widgetUpdateJob?.cancel()
-        widgetUpdateJob = lifecycleScope.launch {
-            while (true) {
-                kotlinx.coroutines.delay(60_000)
-                TimerWidget.triggerUpdate(this@WiFiMonitorService)
-            }
         }
     }
 
@@ -335,7 +320,6 @@ class WiFiMonitorService : LifecycleService() {
                 "当前未连接目标WiFi"
             }
             notificationManager.notify(NOTIFICATION_ID, buildNotification(title, content))
-            TimerWidget.triggerUpdate(this@WiFiMonitorService)
         }
     }
 
