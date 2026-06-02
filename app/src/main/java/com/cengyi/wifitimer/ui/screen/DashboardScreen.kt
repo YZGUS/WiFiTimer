@@ -50,7 +50,7 @@ private fun isReduceMotionEnabled(): Boolean {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun DashboardScreen(
     onNavigateToWhitelist: () -> Unit,
@@ -103,33 +103,34 @@ fun DashboardScreen(
 
             // 快捷操作
             item {
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilledTonalButton(
                         onClick = onNavigateToWhitelist,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("白名单")
+                        Spacer(Modifier.width(4.dp))
+                        Text("白名单", maxLines = 1)
                     }
                     FilledTonalButton(
                         onClick = onNavigateToIgnoreWindows,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("忽略时段")
+                        Spacer(Modifier.width(4.dp))
+                        Text("忽略时段", maxLines = 1)
                     }
                     FilledTonalButton(
                         onClick = onNavigateToHistory,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("历史")
+                        Spacer(Modifier.width(4.dp))
+                        Text("历史", maxLines = 1)
                     }
                 }
             }

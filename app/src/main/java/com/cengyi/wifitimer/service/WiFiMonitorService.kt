@@ -27,6 +27,7 @@ import com.cengyi.wifitimer.util.WifiUtils
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -41,6 +42,7 @@ class WiFiMonitorService : LifecycleService() {
     @Inject lateinit var targetConfigRepo: com.cengyi.wifitimer.data.repository.TargetConfigRepository
 
     private var activeSession: ActiveSession? = null
+    private var whitelistJob: kotlinx.coroutines.Job? = null
     private val notificationManager by lazy {
         getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     }
@@ -88,6 +90,7 @@ class WiFiMonitorService : LifecycleService() {
         _serviceRunning.value = true
 
         registerWifiReceiver()
+        observeWhitelistChanges()
         checkAndUpdateWifiState()
 
         // Schedule periodic WiFi check as fallback
@@ -98,6 +101,7 @@ class WiFiMonitorService : LifecycleService() {
 
     override fun onDestroy() {
         Log.d(TAG, "onDestroy")
+        whitelistJob?.cancel()
         endActiveSession()
         _serviceRunning.value = false
         _connectionState.value = ConnectionState.Disconnected
@@ -141,6 +145,18 @@ class WiFiMonitorService : LifecycleService() {
             addAction(ConnectivityManager.CONNECTIVITY_ACTION)
         }
         registerReceiver(wifiReceiver, filter)
+    }
+
+    private fun observeWhitelistChanges() {
+        whitelistJob?.cancel()
+        whitelistJob = lifecycleScope.launch {
+            whitelistRepo.getEnabled()
+                .distinctUntilChanged()
+                .collect {
+                    Log.d(TAG, "Whitelist changed, re-checking WiFi state")
+                    checkAndUpdateWifiState()
+                }
+        }
     }
 
     fun checkAndUpdateWifiState() {
