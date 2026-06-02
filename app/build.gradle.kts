@@ -79,11 +79,10 @@ dependencies {
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
-    // DataStore
+// DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
 
-    // Glance Widget
+// Glance Widget
     implementation("androidx.glance:glance-appwidget:1.1.0")
     implementation("androidx.glance:glance-material3:1.1.0")
-
 }
