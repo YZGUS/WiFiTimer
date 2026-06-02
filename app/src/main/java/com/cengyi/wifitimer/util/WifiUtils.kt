@@ -61,6 +61,39 @@ object WifiUtils {
         }
     }
 
+    /**
+     * 紧凑格式化时长（毫秒 → "9h 30m" / "45m" / "30s"），用于列表项避免折行
+     */
+    fun formatDurationCompact(ms: Long): String {
+        val totalSeconds = ms / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        return when {
+            hours > 0 && minutes > 0 -> "${hours}h ${minutes}m"
+            hours > 0 -> "${hours}h"
+            minutes > 0 -> "${minutes}m"
+            else -> "${totalSeconds}s"
+        }
+    }
+
+    data class DurationParts(
+        val hours: Int,
+        val minutes: Int,
+        val seconds: Int
+    ) {
+        val showHours: Boolean get() = hours > 0
+        val showMinutes: Boolean get() = minutes > 0 || hours > 0
+    }
+
+    fun decomposeDuration(ms: Long): DurationParts {
+        val totalSeconds = (ms / 1000).coerceAtLeast(0L)
+        return DurationParts(
+            hours = (totalSeconds / 3600).toInt(),
+            minutes = ((totalSeconds % 3600) / 60).toInt(),
+            seconds = (totalSeconds % 60).toInt()
+        )
+    }
+
     /** 默认目标时长 9.5 小时 = 570 分钟 */
     const val DEFAULT_TARGET_MINUTES = 570
     const val DEFAULT_TARGET_MS = DEFAULT_TARGET_MINUTES * 60_000L

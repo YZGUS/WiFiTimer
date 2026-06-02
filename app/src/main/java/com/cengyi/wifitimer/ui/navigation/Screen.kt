@@ -5,4 +5,5 @@ sealed class Screen(val route: String) {
     data object Whitelist : Screen("whitelist")
     data object IgnoreWindows : Screen("ignore_windows")
     data object History : Screen("history")
+    data object Onboarding : Screen("onboarding")
 }

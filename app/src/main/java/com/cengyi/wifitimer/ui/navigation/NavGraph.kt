@@ -7,11 +7,12 @@ import androidx.navigation.compose.composable
 import com.cengyi.wifitimer.ui.screen.DashboardScreen
 import com.cengyi.wifitimer.ui.screen.HistoryScreen
 import com.cengyi.wifitimer.ui.screen.IgnoreWindowsScreen
+import com.cengyi.wifitimer.ui.screen.OnboardingScreen
 import com.cengyi.wifitimer.ui.screen.WhitelistScreen
 
 @Composable
-fun NavGraph(navController: NavHostController) {
-    NavHost(navController, startDestination = Screen.Dashboard.route) {
+fun NavGraph(navController: NavHostController, startDestination: String = Screen.Dashboard.route) {
+    NavHost(navController, startDestination = startDestination) {
         composable(Screen.Dashboard.route) {
             DashboardScreen(
                 onNavigateToWhitelist = { navController.navigate(Screen.Whitelist.route) },
@@ -27,6 +28,16 @@ fun NavGraph(navController: NavHostController) {
         }
         composable(Screen.History.route) {
             HistoryScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Screen.Onboarding.route) {
+            OnboardingScreen(
+                onAddWifi = { navController.navigate(Screen.Whitelist.route) },
+                onComplete = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo(Screen.Onboarding.route) { inclusive = true }
+                    }
+                }
+            )
         }
     }
 }
