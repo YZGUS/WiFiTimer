@@ -7,7 +7,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:text="7时30分"
-        android:textSize="24sp"
+        android:text="7h 30m"
+        android:textSize="22sp"
         android:textStyle="bold" />
 </FrameLayout>

@@ -9,9 +9,9 @@ import androidx.glance.appwidget.*
 import androidx.glance.layout.*
 import androidx.glance.material3.*
 import androidx.glance.text.*
-import com.cengyi.wifitimer.data.repository.IgnoreWindowRepository
 import com.cengyi.wifitimer.data.repository.SessionRepository
 import com.cengyi.wifitimer.data.repository.TargetConfigRepository
+import com.cengyi.wifitimer.data.repository.IgnoreWindowRepository
 import com.cengyi.wifitimer.service.ConnectionState
 import com.cengyi.wifitimer.service.WiFiMonitorService
 import com.cengyi.wifitimer.util.IgnoreWindowCalculator
@@ -34,7 +34,6 @@ class TimerWidget : GlanceAppWidget() {
         val serviceRunning: Boolean,
         val effectiveMs: Long,
         val targetMs: Long,
-        val isFrozen: Boolean,
         val progress: Float
     ) {
         val isReached: Boolean get() = effectiveMs >= targetMs && targetMs > 0
@@ -75,9 +74,6 @@ private suspend fun loadWidgetState(context: Context): TimerWidget.WidgetState {
     val windows = ignoreWindowRepo.getEnabledList()
     val now = System.currentTimeMillis()
 
-    val isFrozen = connected &&
-        IgnoreWindowCalculator.isCurrentlyInIgnoreWindow(now, windows)
-
     val effectiveMs = if (connected && connectionState is ConnectionState.Connected) {
         val activeEffective = IgnoreWindowCalculator.computeEffectiveDuration(
             connectionState.startTime, now, windows
@@ -95,22 +91,21 @@ private suspend fun loadWidgetState(context: Context): TimerWidget.WidgetState {
         serviceRunning = serviceRunning,
         effectiveMs = effectiveMs,
         targetMs = targetMs,
-        isFrozen = isFrozen,
         progress = progress
     )
 }
 
 @Composable
 private fun WidgetContent(state: TimerWidget.WidgetState) {
-    val durationText = WifiUtils.formatDuration(state.effectiveMs)
-    val targetText = WifiUtils.formatDuration(state.targetMs)
+    val durationText = WifiUtils.formatDurationCompact(state.effectiveMs)
+    val targetText = WifiUtils.formatDurationCompact(state.targetMs)
 
     GlanceTheme {
         Box(
             modifier = GlanceModifier
                 .fillMaxSize()
                 .background(GlanceTheme.colors.surfaceVariant)
-                .padding(12.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             contentAlignment = Alignment.Center
         ) {
             Column(
@@ -123,7 +118,7 @@ private fun WidgetContent(state: TimerWidget.WidgetState) {
                         text = state.ssid,
                         style = TextStyle(
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
+                            fontSize = 12.sp,
                             color = GlanceTheme.colors.primary
                         ),
                         maxLines = 1
@@ -132,19 +127,19 @@ private fun WidgetContent(state: TimerWidget.WidgetState) {
                     Text(
                         text = if (state.serviceRunning) "未连接WiFi" else "服务未启动",
                         style = TextStyle(
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = GlanceTheme.colors.onSurfaceVariant
                         )
                     )
                 }
 
-                Spacer(modifier = GlanceModifier.height(8.dp))
+                Spacer(modifier = GlanceModifier.height(4.dp))
 
                 Text(
                     text = durationText,
                     style = TextStyle(
                         fontWeight = FontWeight.Bold,
-                        fontSize = 28.sp
+                        fontSize = 24.sp
                     )
                 )
 
@@ -154,20 +149,15 @@ private fun WidgetContent(state: TimerWidget.WidgetState) {
                     progress = state.progress,
                     modifier = GlanceModifier
                         .fillMaxWidth()
-                        .height(6.dp)
+                        .height(4.dp)
                 )
 
-                Spacer(modifier = GlanceModifier.height(4.dp))
+                Spacer(modifier = GlanceModifier.height(3.dp))
 
-                val statusText = when {
-                    state.isFrozen -> "冻结中 · 目标 $targetText"
-                    state.isReached -> "今日已达标"
-                    else -> "目标 $targetText"
-                }
                 Text(
-                    text = statusText,
+                    text = if (state.isReached) "已达标" else "目标 $targetText",
                     style = TextStyle(
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         color = GlanceTheme.colors.onSurfaceVariant
                     )
                 )
