@@ -19,23 +19,20 @@ data class IgnoreWindow(
     val enabled: Boolean = true
 )
 
-fun IgnoreWindow.toTodayRanges(): List<Pair<Long, Long>> {
-    val today = LocalDate.now()
-    val start = LocalDateTime.of(today, LocalTime.of(startHour, startMinute))
+fun IgnoreWindow.toRangesForDate(date: LocalDate): List<Pair<Long, Long>> {
+    val start = LocalDateTime.of(date, LocalTime.of(startHour, startMinute))
 
-    // 跨午夜：结束时间在次日
     val endDate = if (endHour * 60 + endMinute <= startHour * 60 + startMinute) {
-        today.plusDays(1)
+        date.plusDays(1)
     } else {
-        today
+        date
     }
     val end = LocalDateTime.of(endDate, LocalTime.of(endHour, endMinute))
 
     val startMs = start.toInstant(java.time.ZoneId.systemDefault().rules.getOffset(start)).toEpochMilli()
     val endMs = end.toInstant(java.time.ZoneId.systemDefault().rules.getOffset(end)).toEpochMilli()
 
-    // 如果跨午夜，拆分为两段
-    val midnight = today.plusDays(1).atStartOfDay()
+    val midnight = date.plusDays(1).atStartOfDay()
     val midnightMs = midnight.toInstant(java.time.ZoneId.systemDefault().rules.getOffset(midnight)).toEpochMilli()
 
     return if (endMs > midnightMs) {
@@ -44,3 +41,5 @@ fun IgnoreWindow.toTodayRanges(): List<Pair<Long, Long>> {
         listOf(startMs to endMs)
     }
 }
+
+fun IgnoreWindow.toTodayRanges(): List<Pair<Long, Long>> = toRangesForDate(LocalDate.now())

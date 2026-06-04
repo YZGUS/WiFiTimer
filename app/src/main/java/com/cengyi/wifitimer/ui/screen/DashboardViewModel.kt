@@ -81,7 +81,7 @@ class DashboardViewModel @Inject constructor(
                     sessionRepo.getEffectiveTotalFlow(dateStr),
                     sessionRepo.getSessionsByDate(dateStr)
                 ) { totalMs, sessions -> totalMs to sessions }
-            }
+            }.distinctUntilChanged()
 
             val coreFlow = combine(
                 dbFlow,
@@ -144,8 +144,10 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun updateTarget(hours: Int, minutes: Int) {
+        val totalMinutes = hours * 60 + minutes
+        if (totalMinutes <= 0) return
         viewModelScope.launch {
-            targetConfigRepo.updateTargetMinutes(hours * 60 + minutes)
+            targetConfigRepo.updateTargetMinutes(totalMinutes)
         }
     }
 }

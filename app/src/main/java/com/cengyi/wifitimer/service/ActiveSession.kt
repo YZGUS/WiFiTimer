@@ -5,5 +5,6 @@ data class ActiveSession(
     val bssid: String?,
     val whitelistEntryId: Long,
     val startTime: Long,
-    val targetMinutes: Int
+    val targetMinutes: Int,
+    val lastConfirmedTime: Long = startTime
 )

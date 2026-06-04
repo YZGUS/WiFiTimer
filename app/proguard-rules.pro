@@ -9,8 +9,10 @@
 # Kotlin Coroutines
 -dontwarn kotlinx.coroutines.**
 
-# Compose
--dontwarn androidx.compose.**
+# Glance AppWidget
+-dontwarn androidx.glance.**
+-keep class androidx.glance.** { *; }
+-keep class androidx.glance.appwidget.** { *; }**
 
 # AndroidX
 -dontwarn androidx.**

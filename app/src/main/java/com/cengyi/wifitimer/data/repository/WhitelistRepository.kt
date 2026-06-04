@@ -8,7 +8,8 @@ import javax.inject.Singleton
 
 @Singleton
 class WhitelistRepository @Inject constructor(
-    private val dao: WhitelistDao
+    private val dao: WhitelistDao,
+    private val sessionDao: com.cengyi.wifitimer.data.local.SessionDao
 ) {
     fun getAll(): Flow<List<WiFiWhitelistEntry>> = dao.getAll()
 
@@ -22,9 +23,15 @@ class WhitelistRepository @Inject constructor(
 
     suspend fun update(entry: WiFiWhitelistEntry) = dao.update(entry)
 
-    suspend fun delete(entry: WiFiWhitelistEntry) = dao.delete(entry)
+    suspend fun delete(entry: WiFiWhitelistEntry) {
+        sessionDao.deleteByWhitelistEntryId(entry.id)
+        dao.delete(entry)
+    }
 
-    suspend fun deleteById(id: Long) = dao.deleteById(id)
+    suspend fun deleteById(id: Long) {
+        sessionDao.deleteByWhitelistEntryId(id)
+        dao.deleteById(id)
+    }
 
     suspend fun findMatch(ssid: String, bssid: String?): WiFiWhitelistEntry? {
         val normalized = ssid.trim('"')

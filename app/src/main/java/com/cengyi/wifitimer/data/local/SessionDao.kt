@@ -29,4 +29,7 @@ interface SessionDao {
 
     @Query("DELETE FROM wifi_sessions WHERE date = :date")
     suspend fun deleteByDate(date: String)
+
+    @Query("DELETE FROM wifi_sessions WHERE whitelistEntryId = :entryId")
+    suspend fun deleteByWhitelistEntryId(entryId: Long)
 }

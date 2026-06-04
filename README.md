@@ -39,7 +39,6 @@ APK 输出路径: `app/build/outputs/apk/debug/app-debug.apk`
 |------|------|
 | ACCESS_WIFI_STATE | 读取 WiFi 连接信息 |
 | ACCESS_NETWORK_STATE | 检测网络连接状态 |
-| CHANGE_NETWORK_STATE | 网络状态变更通知 |
 | ACCESS_FINE_LOCATION | Android 8+ 获取 WiFi SSID 必需 |
 | ACCESS_COARSE_LOCATION | 获取 WiFi SSID 辅助权限 |
 | FOREGROUND_SERVICE | 前台监控服务 |

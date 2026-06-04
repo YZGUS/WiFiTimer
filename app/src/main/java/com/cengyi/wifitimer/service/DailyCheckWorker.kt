@@ -56,31 +56,32 @@ class DailyCheckWorker @AssistedInject constructor(
         val totalMs = sessionRepo.getEffectiveTotalForDate(today)
 
         val targetMs = targetConfigRepo.getTargetMinutes() * 60_000L
+        val (endHour, endMinute) = targetConfigRepo.getEndHourOfDay()
 
         sessionRepo.recalculateDailyStats(today, targetMs)
 
         val remaining = targetMs - totalMs
         val now = LocalDateTime.now()
-        val endOfWork = LocalDateTime.of(now.toLocalDate(), LocalTime.of(18, 0))
+        val endOfWork = LocalDateTime.of(now.toLocalDate(), LocalTime.of(endHour, endMinute))
         val minutesToEnd = Duration.between(now, endOfWork).toMinutes()
 
         when {
             remaining <= 0 -> {
                 showNotification(
-                    "今日已达标",
-                    "累计 ${WifiUtils.formatDuration(totalMs)}"
+                    applicationContext.getString(R.string.notification_target_reached_title),
+                    applicationContext.getString(R.string.notification_target_reached_text, WifiUtils.formatDuration(totalMs))
                 )
             }
             remaining <= 60 * 60_000 && minutesToEnd in 60..240 -> {
                 showNotification(
-                    "还差 ${WifiUtils.formatDuration(remaining)}",
-                    "加油！距下班还有 ${minutesToEnd}分钟"
+                    applicationContext.getString(R.string.notification_almost_title, WifiUtils.formatDuration(remaining)),
+                    applicationContext.getString(R.string.notification_almost_text, minutesToEnd)
                 )
             }
             minutesToEnd in 0..30 && remaining > 0 -> {
                 showNotification(
-                    "距下班仅 ${minutesToEnd}分钟",
-                    "还差 ${WifiUtils.formatDuration(remaining)}，注意达标"
+                    applicationContext.getString(R.string.notification_urgent_title, minutesToEnd),
+                    applicationContext.getString(R.string.notification_urgent_text, WifiUtils.formatDuration(remaining))
                 )
             }
         }

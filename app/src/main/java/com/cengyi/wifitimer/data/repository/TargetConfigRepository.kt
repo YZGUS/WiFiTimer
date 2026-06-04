@@ -20,6 +20,11 @@ class TargetConfigRepository @Inject constructor(
 
     suspend fun getTargetMinutes(): Int = dao.get()?.targetMinutes ?: WifiUtils.DEFAULT_TARGET_MINUTES
 
+    suspend fun getEndHourOfDay(): Pair<Int, Int> {
+        val config = dao.get()
+        return if (config != null) Pair(config.endHour, config.endMinute) else Pair(18, 0)
+    }
+
     suspend fun upsert(config: TargetConfig) = dao.upsert(config)
 
     suspend fun updateTargetMinutes(minutes: Int) {

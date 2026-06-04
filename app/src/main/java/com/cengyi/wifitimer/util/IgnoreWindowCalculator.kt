@@ -1,6 +1,7 @@
 package com.cengyi.wifitimer.util
 
 import com.cengyi.wifitimer.data.local.IgnoreWindow
+import com.cengyi.wifitimer.data.local.toRangesForDate
 import com.cengyi.wifitimer.data.local.toTodayRanges
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -9,23 +10,23 @@ object IgnoreWindowCalculator {
 
     /**
      * 计算有效时长：从原始 session 区间中扣除所有启用的忽略时段
+     * @param date 会话片段所属的日期，用于匹配忽略时段的 repeatDays
      */
     fun computeEffectiveDuration(
         sessionStartMs: Long,
         sessionEndMs: Long,
-        windows: List<IgnoreWindow>
+        windows: List<IgnoreWindow>,
+        date: LocalDate = LocalDate.now()
     ): Long {
         if (sessionEndMs <= sessionStartMs) return 0L
 
-        val today = LocalDate.now()
-        val todayDow = today.dayOfWeek
+        val dateDow = date.dayOfWeek
 
-        // 收集今天生效的忽略时段的时间戳区间
         val ranges = mutableListOf<Pair<Long, Long>>()
         for (w in windows) {
             if (!w.enabled) continue
-            if (w.repeatDays.isNotEmpty() && todayDow !in w.repeatDays) continue
-            ranges.addAll(w.toTodayRanges())
+            if (w.repeatDays.isNotEmpty() && dateDow !in w.repeatDays) continue
+            ranges.addAll(w.toRangesForDate(date))
         }
 
         // 合并重叠区间

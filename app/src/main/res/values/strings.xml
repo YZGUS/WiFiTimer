@@ -3,9 +3,121 @@
     <string name="app_name">WiFi计时器</string>
     <string name="channel_monitor">WiFi监控服务</string>
     <string name="channel_reminder">达标提醒</string>
+    <string name="channel_disconnect">WiFi断开提醒</string>
     <string name="notification_monitor_title">WiFi监控运行中</string>
+    <string name="notification_monitor_initializing">正在初始化…</string>
     <string name="notification_monitor_connected">今日有效：%1$s / 目标 %2$s</string>
     <string name="notification_monitor_disconnected">当前未连接目标WiFi</string>
+    <string name="notification_disconnect_title">已离开目标WiFi</string>
+    <string name="notification_disconnect_text">已断开 %1$s 的连接</string>
+    <string name="notification_target_reached_title">今日已达标</string>
+    <string name="notification_target_reached_text">累计 %1$s</string>
+    <string name="notification_almost_title">还差 %1$s</string>
+    <string name="notification_almost_text">加油！距下班还有 %1$d分钟</string>
+    <string name="notification_urgent_title">距下班仅 %1$d分钟</string>
+    <string name="notification_urgent_text">还差 %1$s，注意达标</string>
     <string name="widget_description">显示WiFi计时进度</string>
     <string name="widget_loading">加载中…</string>
+    <string name="widget_disconnected">未连接WiFi</string>
+    <string name="widget_service_not_running">服务未启动</string>
+    <string name="widget_target_reached">已达标</string>
+    <string name="widget_target_format">目标 %1$s</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">WiFi计时器</string>
+    <string name="dashboard_loading">加载中…</string>
+    <string name="dashboard_connected_prefix">已连接：</string>
+    <string name="dashboard_disconnected">未连接目标WiFi</string>
+    <string name="dashboard_connected_hint">请确保WiFi已开启且在白名单范围内</string>
+    <string name="dashboard_target_frozen">忽略时段 · 已冻结</string>
+    <string name="dashboard_target_reached">今日已达标</string>
+    <string name="dashboard_remaining_format">还差 %1$s</string>
+    <string name="dashboard_target_format">目标 %1$s</string>
+    <string name="dashboard_today_records">今日连接记录</string>
+    <string name="dashboard_no_whitelist">还没有监控的WiFi</string>
+    <string name="dashboard_no_whitelist_hint">添加常驻WiFi到白名单后自动计时</string>
+    <string name="dashboard_add_wifi">添加WiFi</string>
+    <string name="dashboard_not_connected">当前未连接目标WiFi</string>
+    <string name="dashboard_not_connected_hint">连接白名单中的WiFi后自动开始计时</string>
+    <string name="dashboard_just_started">刚开始记录</string>
+    <string name="dashboard_just_started_hint">连接时间不足30秒不计入有效时长</string>
+    <string name="dashboard_whitelist">白名单</string>
+    <string name="dashboard_ignore_windows">忽略时段</string>
+    <string name="dashboard_history">历史</string>
+    <string name="dashboard_battery_optimization">电池优化</string>
+    <string name="dialog_target_title">设置每日目标时长</string>
+    <string name="dialog_target_hint">所有监控WiFi共享同一目标时长，不同楼层/AP的WiFi连接时间将合并计算。</string>
+    <string name="dialog_target_hours_label">小时</string>
+    <string name="dialog_target_minutes_label">分钟</string>
+    <string name="dialog_target_save">保存</string>
+    <string name="dialog_target_cancel">取消</string>
+
+    <!-- Whitelist -->
+    <string name="whitelist_title">WiFi白名单</string>
+    <string name="whitelist_empty">暂无白名单条目</string>
+    <string name="whitelist_empty_hint">点击 + 添加要监控的WiFi</string>
+    <string name="whitelist_add_title">添加WiFi白名单</string>
+    <string name="whitelist_add_ssid_label">WiFi名称</string>
+    <string name="whitelist_add_location_hint">点击输入框右侧图标授权位置权限，即可扫描附近WiFi</string>
+    <string name="whitelist_add_no_scan_hint">未扫描到WiFi，请手动输入WiFi名称</string>
+    <string name="whitelist_add_alias_label">备注别名（可选）</string>
+    <string name="whitelist_add_confirm">添加</string>
+    <string name="whitelist_edit_title">编辑白名单</string>
+    <string name="whitelist_edit_wifi_label">WiFi: %1$s</string>
+    <string name="whitelist_edit_alias_label">备注别名</string>
+    <string name="whitelist_edit_save">保存</string>
+
+    <!-- Ignore Windows -->
+    <string name="ignore_title">忽略时段</string>
+    <string name="ignore_empty">暂无忽略时段</string>
+    <string name="ignore_empty_hint">添加忽略时段以排除非工作时间</string>
+    <string name="ignore_add_title">添加忽略时段</string>
+    <string name="ignore_edit_title">编辑忽略时段</string>
+    <string name="ignore_label_hint">标签（如：午餐）</string>
+    <string name="ignore_start_time">开始时间</string>
+    <string name="ignore_end_time">结束时间</string>
+    <string name="ignore_repeat_days">重复日</string>
+    <string name="ignore_today_only">仅今日</string>
+
+    <!-- History -->
+    <string name="history_title">历史记录</string>
+    <string name="history_no_data">当日无数据</string>
+    <string name="history_no_sessions">当日无连接记录</string>
+    <string name="history_effective_time">有效时长</string>
+    <string name="history_session_count_format">%1$d次</string>
+    <string name="history_status">状态</string>
+    <string name="history_reached">已达标</string>
+    <string name="history_not_reached">未达标</string>
+    <string name="history_session_records">连接记录</string>
+    <string name="history_weekly_overview">本周概览</string>
+    <string name="history_raw_prefix">原始 </string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_skip">跳过</string>
+    <string name="onboarding_wifi_title">添加监控WiFi</string>
+    <string name="onboarding_wifi_hint">将常驻的WiFi添加到白名单\n进入范围自动计时</string>
+    <string name="onboarding_target_title">设置每日目标</string>
+    <string name="onboarding_target_hint">设定工作时长目标\n达标时收到提醒</string>
+    <string name="onboarding_permission_title">开启必要权限</string>
+    <string name="onboarding_permission_hint">位置权限用于识别WiFi\n通知权限用于断开提醒</string>
+    <string name="onboarding_location_label">位置权限</string>
+    <string name="onboarding_notification_label">通知权限</string>
+    <string name="onboarding_authorize">授权</string>
+    <string name="onboarding_complete">完成设置</string>
+
+    <!-- Service -->
+    <string name="service_connected_since_format">自 %1$s 起</string>
+
+    <!-- Time units -->
+    <string name="time_hours">时</string>
+    <string name="time_minutes">分</string>
+    <string name="time_seconds">秒</string>
+
+    <!-- Common -->
+    <string name="common_back">返回</string>
+    <string name="common_add">添加</string>
+    <string name="common_delete">删除</string>
+    <string name="common_edit">编辑</string>
+    <string name="common_cancel">取消</string>
+    <string name="common_confirm">确定</string>
 </resources>

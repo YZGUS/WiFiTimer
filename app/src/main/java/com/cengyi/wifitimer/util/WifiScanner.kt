@@ -20,10 +20,9 @@ object WifiScanner {
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         val results = mutableListOf<ScanResult>()
 
-        // Currently connected WiFi
         val connectionInfo = wifiManager.connectionInfo
         val connectedSsid = connectionInfo?.ssid?.trim('"')
-        if (!connectedSsid.isNullOrBlank() && !isUnknownSsid(connectedSsid)) {
+        if (!connectedSsid.isNullOrBlank() && !WifiUtils.isUnknownSsid(connectedSsid)) {
             results.add(
                 ScanResult(
                     ssid = connectedSsid,
@@ -33,11 +32,10 @@ object WifiScanner {
             )
         }
 
-        // Scan results (requires location permission granted at runtime)
         val scanResults = wifiManager.scanResults ?: emptyList()
         for (scan in scanResults) {
             val ssid = scan.SSID?.trim('"') ?: continue
-            if (ssid.isBlank() || isUnknownSsid(ssid)) continue
+            if (ssid.isBlank() || WifiUtils.isUnknownSsid(ssid)) continue
             if (results.none { it.ssid == ssid }) {
                 results.add(
                     ScanResult(
@@ -50,11 +48,5 @@ object WifiScanner {
         }
 
         return results.sortedByDescending { it.level }
-    }
-
-    private fun isUnknownSsid(ssid: String): Boolean {
-        return ssid.equals("<unknown ssid>", ignoreCase = true) ||
-                ssid == "0x" ||
-                ssid == "unknown ssid"
     }
 }

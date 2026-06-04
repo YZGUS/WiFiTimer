@@ -27,7 +27,14 @@ object DatabaseModule {
                 )
             """)
             // Insert default config
-            db.execSQL("INSERT INTO target_config (id, targetMinutes, label, enabled) VALUES (1, 570, '工作日目标', 1)")
+            db.execSQL("INSERT OR IGNORE INTO target_config (id, targetMinutes, label, enabled) VALUES (1, 570, '工作日目标', 1)")
+        }
+    }
+
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE target_config ADD COLUMN endHour INTEGER NOT NULL DEFAULT 18")
+            db.execSQL("ALTER TABLE target_config ADD COLUMN endMinute INTEGER NOT NULL DEFAULT 0")
         }
     }
 
@@ -39,7 +46,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "wifitimer.db"
         )
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     }
 

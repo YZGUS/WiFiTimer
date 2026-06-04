@@ -7,10 +7,14 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
@@ -26,11 +30,20 @@ import com.cengyi.wifitimer.util.TimeUtils
 import com.cengyi.wifitimer.util.WifiUtils
 import com.cengyi.wifitimer.widget.TimerWidget
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
@@ -44,20 +57,68 @@ class WiFiMonitorService : LifecycleService() {
     @Inject lateinit var targetConfigRepo: com.cengyi.wifitimer.data.repository.TargetConfigRepository
 
     private var activeSession: ActiveSession? = null
-    private var whitelistJob: kotlinx.coroutines.Job? = null
-    private var widgetUpdateJob: kotlinx.coroutines.Job? = null
+    private var whitelistJob: Job? = null
+    private var periodicUpdateJob: Job? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var wifiReceiver: android.content.BroadcastReceiver? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var disconnectCheckJob: Job? = null
+    private var endSessionJob: Job? = null
+    private val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val stateMutex = Mutex()
+    private val prefs by lazy {
+        getSharedPreferences("wifi_monitor_prefs", Context.MODE_PRIVATE)
+    }
     private val notificationManager by lazy {
         getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     }
 
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
+    private fun persistActiveSession() {
+        val s = activeSession ?: run {
+            prefs.edit().remove("active_session_ssid").apply()
+            return
+        }
+        prefs.edit()
+            .putString("active_session_ssid", s.ssid)
+            .putString("active_session_bssid", s.bssid)
+            .putLong("active_session_whitelist_id", s.whitelistEntryId)
+            .putLong("active_session_start_time", s.startTime)
+            .putInt("active_session_target_minutes", s.targetMinutes)
+            .putLong("active_session_last_confirmed", s.lastConfirmedTime)
+            .apply()
+    }
+
+    private fun loadPersistedActiveSession(): ActiveSession? {
+        val ssid = prefs.getString("active_session_ssid", null) ?: return null
+        val bssid = prefs.getString("active_session_bssid", null)
+        val whitelistId = prefs.getLong("active_session_whitelist_id", 0)
+        val startTime = prefs.getLong("active_session_start_time", 0)
+        val targetMinutes = prefs.getInt("active_session_target_minutes", 0)
+        val lastConfirmed = prefs.getLong("active_session_last_confirmed", 0)
+        if (startTime == 0L || targetMinutes == 0) return null
+        return ActiveSession(
+            ssid = ssid,
+            bssid = bssid,
+            whitelistEntryId = whitelistId,
+            startTime = startTime,
+            targetMinutes = targetMinutes,
+            lastConfirmedTime = lastConfirmed
+        )
+    }
+
+    private fun clearPersistedActiveSession() {
+        prefs.edit().remove("active_session_ssid").apply()
+    }
+
     companion object {
         const val CHANNEL_ID = "wifi_monitor_service"
-        const val CHANNEL_DISCONNECT = "wifi_disconnect_alert"
+        const val CHANNEL_DISCONNECT = "wifi_disconnect_alert_v2"
         const val NOTIFICATION_ID = 1001
         const val DISCONNECT_NOTIFICATION_ID = 2001
         const val ACTION_START = "com.cengyi.wifitimer.START_MONITOR"
+        private const val DISCONNECT_CONFIRM_DELAY_MS = 3000L
 
         private const val TAG = "WiFiMonitorService"
 
@@ -89,15 +150,19 @@ class WiFiMonitorService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         Log.d(TAG, "onStartCommand, action=${intent?.action}")
 
-        startForeground(NOTIFICATION_ID, buildNotification("WiFi监控运行中", "正在初始化..."))
+        startForeground(NOTIFICATION_ID, buildNotification(getString(R.string.notification_monitor_title), getString(R.string.notification_monitor_initializing)))
         _serviceRunning.value = true
 
-        registerWifiReceiver()
-        observeWhitelistChanges()
-        startWidgetUpdateLoop()
-        checkAndUpdateWifiState()
+        whitelistJob?.cancel()
+        periodicUpdateJob?.cancel()
+        disconnectCheckJob?.cancel()
 
-        // Schedule periodic WiFi check as fallback
+        registerWifiReceiver()
+        registerNetworkCallback()
+        observeWhitelistChanges()
+        startPeriodicUpdateLoop()
+        restoreOrProcessWifiState()
+
         MonitorCheckWorker.schedule(this)
 
         return START_STICKY
@@ -106,18 +171,22 @@ class WiFiMonitorService : LifecycleService() {
     override fun onDestroy() {
         Log.d(TAG, "onDestroy")
         whitelistJob?.cancel()
-        widgetUpdateJob?.cancel()
+        periodicUpdateJob?.cancel()
+        disconnectCheckJob?.cancel()
         endActiveSession()
+        runBlocking {
+            withTimeout(2000) { endSessionJob?.join() }
+        }
+        saveScope.cancel()
+        releaseWakeLock()
+        unregisterWifiReceiver()
+        unregisterNetworkCallback()
         _serviceRunning.value = false
         _connectionState.value = ConnectionState.Disconnected
-        try {
-            unregisterReceiver(wifiReceiver)
-        } catch (_: Exception) {}
         super.onDestroy()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Restart service when app is swiped away from recents
         val restartIntent = Intent(this, WiFiMonitorService::class.java).apply {
             action = ACTION_START
         }
@@ -129,28 +198,112 @@ class WiFiMonitorService : LifecycleService() {
         super.onTaskRemoved(rootIntent)
     }
 
-    private val wifiReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
-            Log.d(TAG, "Broadcast received: ${intent.action}")
-            when (intent.action) {
-                WifiManager.NETWORK_STATE_CHANGED_ACTION,
-                ConnectivityManager.CONNECTIVITY_ACTION -> {
-                    checkAndUpdateWifiState()
-                }
+    // ---- WakeLock ----
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "wifitimer::monitor"
+        ).apply {
+            acquire(10 * 60 * 1000L)
+        }
+        Log.d(TAG, "WakeLock acquired")
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+                Log.d(TAG, "WakeLock released")
             }
         }
+        wakeLock = null
     }
+
+    // ---- NetworkCallback (primary detection, works in Doze) ----
+
+    private fun registerNetworkCallback() {
+        try {
+            unregisterNetworkCallback()
+        } catch (_: Exception) {}
+
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                Log.d(TAG, "NetworkCallback onAvailable")
+                processWifiState()
+            }
+
+            override fun onLost(network: Network) {
+                Log.d(TAG, "NetworkCallback onLost")
+                processWifiState()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                Log.d(TAG, "NetworkCallback onCapabilitiesChanged")
+                processWifiState()
+            }
+        }
+
+        connectivityManager.registerNetworkCallback(request, callback)
+        networkCallback = callback
+    }
+
+    private fun unregisterNetworkCallback() {
+        networkCallback?.let {
+            try {
+                val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                connectivityManager.unregisterNetworkCallback(it)
+            } catch (_: Exception) {}
+        }
+        networkCallback = null
+    }
+
+    // ---- BroadcastReceiver (secondary detection) ----
 
     private fun registerWifiReceiver() {
         try {
-            unregisterReceiver(wifiReceiver)
+            unregisterWifiReceiver()
         } catch (_: Exception) {}
+
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                Log.d(TAG, "Broadcast received: ${intent.action}")
+                when (intent.action) {
+                    WifiManager.NETWORK_STATE_CHANGED_ACTION,
+                    ConnectivityManager.CONNECTIVITY_ACTION -> {
+                        processWifiState()
+                    }
+                }
+            }
+        }
         val filter = IntentFilter().apply {
             addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
             addAction(ConnectivityManager.CONNECTIVITY_ACTION)
         }
-        registerReceiver(wifiReceiver, filter)
+        registerReceiver(receiver, filter)
+        wifiReceiver = receiver
     }
+
+    private fun unregisterWifiReceiver() {
+        wifiReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (_: Exception) {}
+        }
+        wifiReceiver = null
+    }
+
+    // ---- Whitelist observer ----
 
     private fun observeWhitelistChanges() {
         whitelistJob?.cancel()
@@ -159,105 +312,185 @@ class WiFiMonitorService : LifecycleService() {
                 .distinctUntilChanged()
                 .collect {
                     Log.d(TAG, "Whitelist changed, re-checking WiFi state")
-                    checkAndUpdateWifiState()
+                    processWifiState()
                 }
         }
     }
 
-    private fun startWidgetUpdateLoop() {
-        widgetUpdateJob?.cancel()
-        widgetUpdateJob = lifecycleScope.launch {
+    // ---- Periodic update (notification + widget + session confirmation) ----
+
+    private fun startPeriodicUpdateLoop() {
+        periodicUpdateJob?.cancel()
+        periodicUpdateJob = lifecycleScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(60_000)
+                delay(60_000)
+                confirmActiveSession()
+                persistActiveSession()
+                updateNotification()
                 TimerWidget.triggerUpdate(this@WiFiMonitorService)
             }
         }
     }
 
-    fun checkAndUpdateWifiState() {
-        Log.d(TAG, "checkAndUpdateWifiState called, activeSession=${activeSession?.ssid}")
-
-        val wifiInfo = getWifiInfo() ?: run {
-            // No WiFi at all
-            Log.d(TAG, "No WiFi connection detected")
-            if (activeSession != null) {
-                val wasSsid = activeSession!!.ssid
-                endActiveSession()
-                sendDisconnectNotification(wasSsid)
-                Log.d(TAG, "Disconnected (no WiFi), sent notification for $wasSsid")
+    private fun confirmActiveSession() {
+        val session = activeSession ?: return
+        val wifiInfo = getWifiInfo()
+        val now = System.currentTimeMillis()
+        if (wifiInfo != null) {
+            val ssid = wifiInfo.first
+            if (!WifiUtils.isUnknownSsid(ssid) && ssid == session.ssid) {
+                activeSession = session.copy(lastConfirmedTime = now)
+                Log.d(TAG, "Session confirmed at $now for ${session.ssid}")
             }
-            _connectionState.value = ConnectionState.Disconnected
-            updateNotification()
+        }
+        if (wakeLock?.isHeld == true) {
+            wakeLock?.acquire(10 * 60 * 1000L)
+            Log.d(TAG, "WakeLock re-acquired")
+        }
+    }
+
+    // ---- WiFi state check (entry point, launches coroutine with mutex) ----
+
+    private fun restoreOrProcessWifiState() {
+        lifecycleScope.launch {
+            stateMutex.withLock {
+                handleWifiStateInternal()
+            }
+        }
+    }
+
+    private fun processWifiState() {
+        lifecycleScope.launch {
+            stateMutex.withLock {
+                handleWifiStateInternal()
+            }
+        }
+    }
+
+    private suspend fun handleWifiStateInternal() {
+        Log.d(TAG, "handleWifiStateInternal, activeSession=${activeSession?.ssid}")
+
+        val wifiInfo = getWifiInfo()
+        if (wifiInfo == null) {
+            Log.d(TAG, "No WiFi connection detected")
+            handlePotentialDisconnect(reason = "no_wifi")
             return
         }
+
         val ssid = wifiInfo.first
         val bssid = wifiInfo.second
         Log.d(TAG, "WiFi info: ssid=$ssid, bssid=$bssid")
 
         if (WifiUtils.isUnknownSsid(ssid)) {
-            // Unknown SSID — likely no location permission on Android 10+
-            // Treat as potential disconnect: end active session if any
             Log.w(TAG, "Unknown SSID detected, treating as disconnect check")
-            if (activeSession != null) {
-                val wasSsid = activeSession!!.ssid
+            handlePotentialDisconnect(reason = "unknown_ssid")
+            return
+        }
+
+        val match = whitelistRepo.findMatch(ssid, bssid)
+        val normalizedSsid = WifiUtils.normalizeSsid(ssid)
+        Log.d(TAG, "Whitelist match for '$normalizedSsid': ${match?.ssid}")
+
+        if (match != null && match.enabled) {
+            disconnectCheckJob?.cancel()
+            disconnectCheckJob = null
+
+            val currentActive = activeSession
+            if (currentActive == null) {
+                val now = System.currentTimeMillis()
+                activeSession = ActiveSession(
+                    ssid = normalizedSsid,
+                    bssid = bssid,
+                    whitelistEntryId = match.id,
+                    startTime = now,
+                    targetMinutes = match.targetMinutes,
+                    lastConfirmedTime = now
+                )
+                persistActiveSession()
+                _connectionState.value = ConnectionState.Connected(
+                    ssid = normalizedSsid,
+                    startTime = activeSession!!.startTime,
+                    targetMinutes = match.targetMinutes
+                )
+                acquireWakeLock()
+                Log.d(TAG, "New session started: $normalizedSsid")
+            } else if (currentActive.ssid != normalizedSsid ||
+                (match.bssid != null && currentActive.bssid != bssid)
+            ) {
+                val wasSsid = currentActive.ssid
                 endActiveSession()
                 sendDisconnectNotification(wasSsid)
-                Log.d(TAG, "Disconnected (unknown SSID), sent notification for $wasSsid")
+                val now = System.currentTimeMillis()
+                activeSession = ActiveSession(
+                    ssid = normalizedSsid,
+                    bssid = bssid,
+                    whitelistEntryId = match.id,
+                    startTime = now,
+                    targetMinutes = match.targetMinutes,
+                    lastConfirmedTime = now
+                )
+                persistActiveSession()
+                _connectionState.value = ConnectionState.Connected(
+                    ssid = normalizedSsid,
+                    startTime = activeSession!!.startTime,
+                    targetMinutes = match.targetMinutes
+                )
+                acquireWakeLock()
+                Log.d(TAG, "Session switched: $wasSsid -> $normalizedSsid")
+            } else {
+                activeSession = currentActive.copy(lastConfirmedTime = System.currentTimeMillis())
+                persistActiveSession()
             }
+            updateNotification()
+        } else {
+            handlePotentialDisconnect(reason = "not_in_whitelist")
+        }
+    }
+
+    // ---- Disconnect with delay confirmation ----
+
+    private suspend fun handlePotentialDisconnect(reason: String) {
+        if (activeSession == null) {
+            Log.d(TAG, "No active session, marking disconnected ($reason)")
             _connectionState.value = ConnectionState.Disconnected
+            releaseWakeLock()
             updateNotification()
             return
         }
 
-        lifecycleScope.launch {
-            val match = whitelistRepo.findMatch(ssid, bssid)
-            val normalizedSsid = WifiUtils.normalizeSsid(ssid)
-            Log.d(TAG, "Whitelist match for '$normalizedSsid': ${match?.ssid}")
+        disconnectCheckJob?.cancel()
+        Log.d(TAG, "Potential disconnect ($reason), scheduling ${DISCONNECT_CONFIRM_DELAY_MS}ms confirmation for ${activeSession?.ssid}")
 
-            if (match != null && match.enabled) {
-                val currentActive = activeSession
-                if (currentActive == null) {
-                    activeSession = ActiveSession(
-                        ssid = normalizedSsid,
-                        bssid = bssid,
-                        whitelistEntryId = match.id,
-                        startTime = System.currentTimeMillis(),
-                        targetMinutes = match.targetMinutes
-                    )
-                    _connectionState.value = ConnectionState.Connected(
-                        ssid = normalizedSsid,
-                        startTime = activeSession!!.startTime,
-                        targetMinutes = match.targetMinutes
-                    )
-                    Log.d(TAG, "New session started: $normalizedSsid")
-                } else if (currentActive.ssid != normalizedSsid ||
-                    (match.bssid != null && currentActive.bssid != bssid)
-                ) {
-                    val wasSsid = currentActive.ssid
-                    endActiveSession()
-                    activeSession = ActiveSession(
-                        ssid = normalizedSsid,
-                        bssid = bssid,
-                        whitelistEntryId = match.id,
-                        startTime = System.currentTimeMillis(),
-                        targetMinutes = match.targetMinutes
-                    )
-                    _connectionState.value = ConnectionState.Connected(
-                        ssid = normalizedSsid,
-                        startTime = activeSession!!.startTime,
-                        targetMinutes = match.targetMinutes
-                    )
-                    Log.d(TAG, "Session switched: $wasSsid -> $normalizedSsid")
+        disconnectCheckJob = lifecycleScope.launch {
+            delay(DISCONNECT_CONFIRM_DELAY_MS)
+            stateMutex.withLock {
+                val wifiInfo = getWifiInfo()
+                if (wifiInfo != null) {
+                    val ssid = wifiInfo.first
+                    if (!WifiUtils.isUnknownSsid(ssid)) {
+                        val match = whitelistRepo.findMatch(ssid, wifiInfo.second)
+                        val normalizedSsid = WifiUtils.normalizeSsid(ssid)
+                        if (match != null && match.enabled && normalizedSsid == activeSession?.ssid) {
+                            Log.d(TAG, "Reconnected to same SSID after delay, resuming session: $normalizedSsid")
+                            activeSession = activeSession?.copy(lastConfirmedTime = System.currentTimeMillis())
+                            persistActiveSession()
+                            _connectionState.value = ConnectionState.Connected(
+                                ssid = normalizedSsid,
+                                startTime = activeSession!!.startTime,
+                                targetMinutes = activeSession!!.targetMinutes
+                            )
+                            updateNotification()
+                            return@withLock
+                        }
+                    }
                 }
-                updateNotification()
-            } else {
-                if (activeSession != null) {
-                    val wasSsid = activeSession!!.ssid
-                    endActiveSession()
-                    sendDisconnectNotification(wasSsid)
-                    Log.d(TAG, "Disconnected (not in whitelist), sent notification for $wasSsid")
-                }
+
+                val wasSsid = activeSession?.ssid ?: return@withLock
+                Log.d(TAG, "Disconnect confirmed after delay for $wasSsid")
+                endActiveSession()
+                sendDisconnectNotification(wasSsid)
                 _connectionState.value = ConnectionState.Disconnected
+                releaseWakeLock()
                 updateNotification()
             }
         }
@@ -278,15 +511,19 @@ class WiFiMonitorService : LifecycleService() {
         return ssid to bssid
     }
 
+    // ---- Session end with lastConfirmedTime ----
+
     private fun endActiveSession() {
         val session = activeSession ?: return
         activeSession = null
-        val endTime = System.currentTimeMillis()
+        clearPersistedActiveSession()
+
+        val endTime = session.lastConfirmedTime
         val rawDuration = endTime - session.startTime
 
         if (rawDuration < WifiUtils.MIN_DURATION_MS) return
 
-        lifecycleScope.launch {
+        endSessionJob = saveScope.launch {
             val windows = ignoreWindowRepo.getEnabledList()
             val targetMinutes = targetConfigRepo.getTargetMinutes()
 
@@ -295,8 +532,9 @@ class WiFiMonitorService : LifecycleService() {
                 val segStart = range.first
                 val segEnd = range.second
                 val segRaw = segEnd - segStart
+                val segDate = LocalDate.parse(dateStr, dateFormatter)
                 val effective = IgnoreWindowCalculator.computeEffectiveDuration(
-                    segStart, segEnd, windows
+                    segStart, segEnd, windows, segDate
                 )
                 if (effective > 0) {
                     sessionRepo.insertSession(
@@ -320,19 +558,28 @@ class WiFiMonitorService : LifecycleService() {
         }
     }
 
+    // ---- Notification ----
+
     private fun updateNotification() {
         lifecycleScope.launch {
             val today = LocalDate.now().format(dateFormatter)
             val totalMs = sessionRepo.getEffectiveTotalForDate(today)
             val session = activeSession
             val targetMinutes = targetConfigRepo.getTargetMinutes()
-            val title = "WiFi监控运行中"
+            val targetMs = targetMinutes * 60_000L
+            val title = getString(R.string.notification_monitor_title)
             val content = if (session != null) {
-                val targetStr = WifiUtils.formatDuration(targetMinutes * 60_000L)
-                val currentStr = WifiUtils.formatDuration(totalMs)
-                "今日有效：$currentStr / 目标 $targetStr"
+                val windows = ignoreWindowRepo.getEnabledList()
+                val now = System.currentTimeMillis()
+                val activeEffective = IgnoreWindowCalculator.computeEffectiveDuration(
+                    session.startTime, now, windows
+                )
+                val currentEffective = totalMs + activeEffective
+                val currentStr = WifiUtils.formatDuration(currentEffective)
+                val targetStr = WifiUtils.formatDuration(targetMs)
+                getString(R.string.notification_monitor_connected, currentStr, targetStr)
             } else {
-                "当前未连接目标WiFi"
+                getString(R.string.notification_monitor_disconnected)
             }
             notificationManager.notify(NOTIFICATION_ID, buildNotification(title, content))
             TimerWidget.triggerUpdate(this@WiFiMonitorService)
@@ -375,11 +622,12 @@ class WiFiMonitorService : LifecycleService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_DISCONNECT,
-                "WiFi断开提醒",
+                getString(R.string.channel_disconnect),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "离开目标WiFi时提醒"
+                description = getString(R.string.channel_disconnect)
                 enableVibration(true)
+                vibrationPattern = longArrayOf(0, 300, 200, 300)
             }
             notificationManager.createNotificationChannel(channel)
         }
@@ -388,13 +636,6 @@ class WiFiMonitorService : LifecycleService() {
     private fun sendDisconnectNotification(ssid: String) {
         Log.d(TAG, "Sending disconnect notification for SSID: $ssid")
 
-        // Update foreground notification to show disconnect alert (always visible)
-        notificationManager.notify(
-            NOTIFICATION_ID,
-            buildNotification("已离开目标WiFi", "已断开 $ssid 的连接")
-        )
-
-        // Also try separate high-priority notification (visible if POST_NOTIFICATIONS granted)
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -404,14 +645,21 @@ class WiFiMonitorService : LifecycleService() {
         )
 
         val notification = NotificationCompat.Builder(this, CHANNEL_DISCONNECT)
-            .setContentTitle("已离开目标WiFi")
-            .setContentText("已断开 $ssid 的连接")
+            .setContentTitle(getString(R.string.notification_disconnect_title))
+            .setContentText(getString(R.string.notification_disconnect_text, ssid))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
+            .setDefaults(Notification.DEFAULT_ALL)
+            .setVibrate(longArrayOf(0, 300, 200, 300))
             .build()
 
         notificationManager.notify(DISCONNECT_NOTIFICATION_ID, notification)
+
+        lifecycleScope.launch {
+            delay(3000)
+            updateNotification()
+        }
     }
 }
 

@@ -1,7 +1,6 @@
 package com.cengyi.wifitimer.data.local
 
 import androidx.room.Entity
-import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "wifi_sessions")
