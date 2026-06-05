@@ -31,10 +31,6 @@ import com.cengyi.wifitimer.util.WifiUtils
 import com.cengyi.wifitimer.widget.TimerWidget
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -63,8 +59,6 @@ class WiFiMonitorService : LifecycleService() {
     private var wifiReceiver: android.content.BroadcastReceiver? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var disconnectCheckJob: Job? = null
-    private var endSessionJob: Job? = null
-    private val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val stateMutex = Mutex()
     private val prefs by lazy {
         getSharedPreferences("wifi_monitor_prefs", Context.MODE_PRIVATE)
@@ -75,43 +69,6 @@ class WiFiMonitorService : LifecycleService() {
 
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
-    private fun persistActiveSession() {
-        val s = activeSession ?: run {
-            prefs.edit().remove("active_session_ssid").apply()
-            return
-        }
-        prefs.edit()
-            .putString("active_session_ssid", s.ssid)
-            .putString("active_session_bssid", s.bssid)
-            .putLong("active_session_whitelist_id", s.whitelistEntryId)
-            .putLong("active_session_start_time", s.startTime)
-            .putInt("active_session_target_minutes", s.targetMinutes)
-            .putLong("active_session_last_confirmed", s.lastConfirmedTime)
-            .apply()
-    }
-
-    private fun loadPersistedActiveSession(): ActiveSession? {
-        val ssid = prefs.getString("active_session_ssid", null) ?: return null
-        val bssid = prefs.getString("active_session_bssid", null)
-        val whitelistId = prefs.getLong("active_session_whitelist_id", 0)
-        val startTime = prefs.getLong("active_session_start_time", 0)
-        val targetMinutes = prefs.getInt("active_session_target_minutes", 0)
-        val lastConfirmed = prefs.getLong("active_session_last_confirmed", 0)
-        if (startTime == 0L || targetMinutes == 0) return null
-        return ActiveSession(
-            ssid = ssid,
-            bssid = bssid,
-            whitelistEntryId = whitelistId,
-            startTime = startTime,
-            targetMinutes = targetMinutes,
-            lastConfirmedTime = lastConfirmed
-        )
-    }
-
-    private fun clearPersistedActiveSession() {
-        prefs.edit().remove("active_session_ssid").apply()
-    }
-
     companion object {
         const val CHANNEL_ID = "wifi_monitor_service"
         const val CHANNEL_DISCONNECT = "wifi_disconnect_alert_v2"
@@ -119,6 +76,7 @@ class WiFiMonitorService : LifecycleService() {
         const val DISCONNECT_NOTIFICATION_ID = 2001
         const val ACTION_START = "com.cengyi.wifitimer.START_MONITOR"
         private const val DISCONNECT_CONFIRM_DELAY_MS = 3000L
+        private const val RECOVERY_MAX_GAP_MS = 5 * 60 * 1000L
 
         private const val TAG = "WiFiMonitorService"
 
@@ -138,6 +96,43 @@ class WiFiMonitorService : LifecycleService() {
                 context.startService(intent)
             }
         }
+    }
+
+    // ---- Persistence (crash recovery) ----
+
+    private fun persistActiveSession() {
+        val s = activeSession ?: run {
+            prefs.edit().remove("active_session_ssid").apply()
+            return
+        }
+        prefs.edit()
+            .putString("active_session_ssid", s.ssid)
+            .putString("active_session_bssid", s.bssid)
+            .putLong("active_session_whitelist_id", s.whitelistEntryId)
+            .putLong("active_session_start_time", s.startTime)
+            .putInt("active_session_target_minutes", s.targetMinutes)
+            .putLong("active_session_persisted_at", System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun loadPersistedActiveSession(): ActiveSession? {
+        val ssid = prefs.getString("active_session_ssid", null) ?: return null
+        val bssid = prefs.getString("active_session_bssid", null)
+        val whitelistId = prefs.getLong("active_session_whitelist_id", 0)
+        val startTime = prefs.getLong("active_session_start_time", 0)
+        val targetMinutes = prefs.getInt("active_session_target_minutes", 0)
+        if (startTime == 0L || targetMinutes == 0) return null
+        return ActiveSession(
+            ssid = ssid,
+            bssid = bssid,
+            whitelistEntryId = whitelistId,
+            startTime = startTime,
+            targetMinutes = targetMinutes
+        )
+    }
+
+    private fun clearPersistedActiveSession() {
+        prefs.edit().remove("active_session_ssid").apply()
     }
 
     override fun onCreate() {
@@ -173,11 +168,9 @@ class WiFiMonitorService : LifecycleService() {
         whitelistJob?.cancel()
         periodicUpdateJob?.cancel()
         disconnectCheckJob?.cancel()
-        endActiveSession()
         runBlocking {
-            withTimeout(2000) { endSessionJob?.join() }
+            withTimeout(2000) { endActiveSession() }
         }
-        saveScope.cancel()
         releaseWakeLock()
         unregisterWifiReceiver()
         unregisterNetworkCallback()
@@ -201,7 +194,6 @@ class WiFiMonitorService : LifecycleService() {
     // ---- WakeLock ----
 
     private fun acquireWakeLock() {
-        if (wakeLock?.isHeld == true) return
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
@@ -220,6 +212,13 @@ class WiFiMonitorService : LifecycleService() {
             }
         }
         wakeLock = null
+    }
+
+    private fun reacquireWakeLockIfHeld() {
+        if (wakeLock?.isHeld == true) {
+            wakeLock?.acquire(10 * 60 * 1000L)
+            Log.d(TAG, "WakeLock re-acquired")
+        }
     }
 
     // ---- NetworkCallback (primary detection, works in Doze) ----
@@ -317,35 +316,18 @@ class WiFiMonitorService : LifecycleService() {
         }
     }
 
-    // ---- Periodic update (notification + widget + session confirmation) ----
+    // ---- Periodic update (notification + widget + WakeLock renewal) ----
 
     private fun startPeriodicUpdateLoop() {
         periodicUpdateJob?.cancel()
         periodicUpdateJob = lifecycleScope.launch {
             while (true) {
                 delay(60_000)
-                confirmActiveSession()
+                reacquireWakeLockIfHeld()
                 persistActiveSession()
                 updateNotification()
                 TimerWidget.triggerUpdate(this@WiFiMonitorService)
             }
-        }
-    }
-
-    private fun confirmActiveSession() {
-        val session = activeSession ?: return
-        val wifiInfo = getWifiInfo()
-        val now = System.currentTimeMillis()
-        if (wifiInfo != null) {
-            val ssid = wifiInfo.first
-            if (!WifiUtils.isUnknownSsid(ssid) && ssid == session.ssid) {
-                activeSession = session.copy(lastConfirmedTime = now)
-                Log.d(TAG, "Session confirmed at $now for ${session.ssid}")
-            }
-        }
-        if (wakeLock?.isHeld == true) {
-            wakeLock?.acquire(10 * 60 * 1000L)
-            Log.d(TAG, "WakeLock re-acquired")
         }
     }
 
@@ -354,7 +336,7 @@ class WiFiMonitorService : LifecycleService() {
     private fun restoreOrProcessWifiState() {
         lifecycleScope.launch {
             stateMutex.withLock {
-                handleWifiStateInternal()
+                restoreAndProcessWifiStateInternal()
             }
         }
     }
@@ -365,6 +347,42 @@ class WiFiMonitorService : LifecycleService() {
                 handleWifiStateInternal()
             }
         }
+    }
+
+    private suspend fun restoreAndProcessWifiStateInternal() {
+        val persisted = loadPersistedActiveSession()
+        if (persisted != null) {
+            val persistedAt = prefs.getLong("active_session_persisted_at", 0)
+            val gap = System.currentTimeMillis() - persistedAt
+            if (gap > RECOVERY_MAX_GAP_MS) {
+                Log.d(TAG, "Persisted session too old (gap=${gap}ms), discarding: ${persisted.ssid}")
+                clearPersistedActiveSession()
+            } else {
+                Log.d(TAG, "Found persisted session: ${persisted.ssid}, startTime=${persisted.startTime}, gap=${gap}ms")
+                val wifiInfo = getWifiInfo()
+                if (wifiInfo != null && !WifiUtils.isUnknownSsid(wifiInfo.first)) {
+                    val ssid = WifiUtils.normalizeSsid(wifiInfo.first)
+                    val match = whitelistRepo.findMatch(ssid, wifiInfo.second)
+                    if (match != null && match.enabled && ssid == persisted.ssid) {
+                        Log.d(TAG, "Resuming persisted session: $ssid")
+                        activeSession = persisted
+                        _connectionState.value = ConnectionState.Connected(
+                            ssid = persisted.ssid,
+                            startTime = persisted.startTime,
+                            targetMinutes = persisted.targetMinutes
+                        )
+                        acquireWakeLock()
+                        updateNotification()
+                        return
+                    }
+                }
+                Log.d(TAG, "WiFi changed after restart, ending persisted session: ${persisted.ssid}")
+                activeSession = persisted
+                endActiveSession()
+            }
+        }
+        handleWifiStateInternal()
+        updateNotification()
     }
 
     private suspend fun handleWifiStateInternal() {
@@ -403,13 +421,12 @@ class WiFiMonitorService : LifecycleService() {
                     bssid = bssid,
                     whitelistEntryId = match.id,
                     startTime = now,
-                    targetMinutes = match.targetMinutes,
-                    lastConfirmedTime = now
+                    targetMinutes = match.targetMinutes
                 )
                 persistActiveSession()
                 _connectionState.value = ConnectionState.Connected(
                     ssid = normalizedSsid,
-                    startTime = activeSession!!.startTime,
+                    startTime = now,
                     targetMinutes = match.targetMinutes
                 )
                 acquireWakeLock()
@@ -426,20 +443,16 @@ class WiFiMonitorService : LifecycleService() {
                     bssid = bssid,
                     whitelistEntryId = match.id,
                     startTime = now,
-                    targetMinutes = match.targetMinutes,
-                    lastConfirmedTime = now
+                    targetMinutes = match.targetMinutes
                 )
                 persistActiveSession()
                 _connectionState.value = ConnectionState.Connected(
                     ssid = normalizedSsid,
-                    startTime = activeSession!!.startTime,
+                    startTime = now,
                     targetMinutes = match.targetMinutes
                 )
                 acquireWakeLock()
                 Log.d(TAG, "Session switched: $wasSsid -> $normalizedSsid")
-            } else {
-                activeSession = currentActive.copy(lastConfirmedTime = System.currentTimeMillis())
-                persistActiveSession()
             }
             updateNotification()
         } else {
@@ -472,7 +485,6 @@ class WiFiMonitorService : LifecycleService() {
                         val normalizedSsid = WifiUtils.normalizeSsid(ssid)
                         if (match != null && match.enabled && normalizedSsid == activeSession?.ssid) {
                             Log.d(TAG, "Reconnected to same SSID after delay, resuming session: $normalizedSsid")
-                            activeSession = activeSession?.copy(lastConfirmedTime = System.currentTimeMillis())
                             persistActiveSession()
                             _connectionState.value = ConnectionState.Connected(
                                 ssid = normalizedSsid,
@@ -511,49 +523,47 @@ class WiFiMonitorService : LifecycleService() {
         return ssid to bssid
     }
 
-    // ---- Session end with lastConfirmedTime ----
+    // ---- Session end (synchronous DB write) ----
 
-    private fun endActiveSession() {
+    private suspend fun endActiveSession() {
         val session = activeSession ?: return
         activeSession = null
         clearPersistedActiveSession()
 
-        val endTime = session.lastConfirmedTime
+        val endTime = System.currentTimeMillis()
         val rawDuration = endTime - session.startTime
 
         if (rawDuration < WifiUtils.MIN_DURATION_MS) return
 
-        endSessionJob = saveScope.launch {
-            val windows = ignoreWindowRepo.getEnabledList()
-            val targetMinutes = targetConfigRepo.getTargetMinutes()
+        val windows = ignoreWindowRepo.getEnabledList()
+        val targetMinutes = targetConfigRepo.getTargetMinutes()
 
-            val segments = TimeUtils.splitByDay(session.startTime, endTime)
-            for ((dateStr, range) in segments) {
-                val segStart = range.first
-                val segEnd = range.second
-                val segRaw = segEnd - segStart
-                val segDate = LocalDate.parse(dateStr, dateFormatter)
-                val effective = IgnoreWindowCalculator.computeEffectiveDuration(
-                    segStart, segEnd, windows, segDate
+        val segments = TimeUtils.splitByDay(session.startTime, endTime)
+        for ((dateStr, range) in segments) {
+            val segStart = range.first
+            val segEnd = range.second
+            val segRaw = segEnd - segStart
+            val segDate = LocalDate.parse(dateStr, dateFormatter)
+            val effective = IgnoreWindowCalculator.computeEffectiveDuration(
+                segStart, segEnd, windows, segDate
+            )
+            if (effective > 0) {
+                sessionRepo.insertSession(
+                    WiFiSession(
+                        ssid = session.ssid,
+                        bssid = session.bssid,
+                        whitelistEntryId = session.whitelistEntryId,
+                        startTime = segStart,
+                        endTime = segEnd,
+                        rawDurationMs = segRaw,
+                        effectiveDurationMs = effective,
+                        date = dateStr
+                    )
                 )
-                if (effective > 0) {
-                    sessionRepo.insertSession(
-                        WiFiSession(
-                            ssid = session.ssid,
-                            bssid = session.bssid,
-                            whitelistEntryId = session.whitelistEntryId,
-                            startTime = segStart,
-                            endTime = segEnd,
-                            rawDurationMs = segRaw,
-                            effectiveDurationMs = effective,
-                            date = dateStr
-                        )
-                    )
-                    sessionRepo.recalculateDailyStats(
-                        dateStr,
-                        targetMinutes * 60_000L
-                    )
-                }
+                sessionRepo.recalculateDailyStats(
+                    dateStr,
+                    targetMinutes * 60_000L
+                )
             }
         }
     }
